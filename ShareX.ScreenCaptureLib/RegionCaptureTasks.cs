@@ -2,7 +2,7 @@
 
 /*
     ShareX - A program that allows you to take screenshots and share any file type
-    Copyright (c) 2007-2018 ShareX Team
+    Copyright (c) 2007-2019 ShareX Team
 
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License
@@ -24,7 +24,6 @@
 #endregion License Information (GPL v3)
 
 using ShareX.HelpersLib;
-using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -36,7 +35,6 @@ namespace ShareX.ScreenCaptureLib
         public static Image GetRegionImage(RegionCaptureOptions options)
         {
             RegionCaptureOptions newOptions = GetRegionCaptureOptions(options);
-            newOptions.ShowHotkeys = false;
 
             using (RegionCaptureForm form = new RegionCaptureForm(RegionCaptureMode.Default, newOptions))
             {
@@ -49,7 +47,6 @@ namespace ShareX.ScreenCaptureLib
         public static bool GetRectangleRegion(out Rectangle rect, RegionCaptureOptions options)
         {
             RegionCaptureOptions newOptions = GetRegionCaptureOptions(options);
-            newOptions.ShowHotkeys = false;
 
             using (RegionCaptureForm form = new RegionCaptureForm(RegionCaptureMode.Default, newOptions))
             {
@@ -94,7 +91,6 @@ namespace ShareX.ScreenCaptureLib
         {
             RegionCaptureOptions newOptions = GetRegionCaptureOptions(options);
             newOptions.DetectWindows = false;
-            newOptions.ShowHotkeys = false;
             newOptions.UseDimming = false;
 
             using (RegionCaptureForm form = new RegionCaptureForm(RegionCaptureMode.ScreenColorPicker, newOptions))
@@ -118,7 +114,6 @@ namespace ShareX.ScreenCaptureLib
             RegionCaptureOptions newOptions = GetRegionCaptureOptions(options);
             newOptions.UseDimming = false;
             newOptions.ShowMagnifier = false;
-            newOptions.ShowHotkeys = false;
 
             using (RegionCaptureForm form = new RegionCaptureForm(RegionCaptureMode.OneClick, newOptions))
             {
@@ -133,11 +128,29 @@ namespace ShareX.ScreenCaptureLib
             return null;
         }
 
+        public static void ShowScreenColorPickerDialog(RegionCaptureOptions options, bool checkClipboard = true)
+        {
+            Color color = Color.Red;
+
+            if (checkClipboard && Clipboard.ContainsText())
+            {
+                string text = Clipboard.GetText();
+
+                if (ColorHelpers.ParseColor(text, out Color clipboardColor))
+                {
+                    color = clipboardColor;
+                }
+            }
+
+            ColorPickerForm colorPickerForm = new ColorPickerForm(color, true);
+            colorPickerForm.EnableScreenColorPickerButton(() => GetPointInfo(options));
+            colorPickerForm.Show();
+        }
+
         public static void ShowScreenRuler(RegionCaptureOptions options)
         {
             RegionCaptureOptions newOptions = GetRegionCaptureOptions(options);
             newOptions.QuickCrop = false;
-            newOptions.ShowHotkeys = false;
 
             using (RegionCaptureForm form = new RegionCaptureForm(RegionCaptureMode.Ruler, newOptions))
             {

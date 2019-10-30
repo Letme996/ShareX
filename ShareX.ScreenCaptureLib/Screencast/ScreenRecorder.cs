@@ -2,7 +2,7 @@
 
 /*
     ShareX - A program that allows you to take screenshots and share any file type
-    Copyright (c) 2007-2018 ShareX Team
+    Copyright (c) 2007-2019 ShareX Team
 
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License
@@ -27,7 +27,6 @@ using ShareX.HelpersLib;
 using System;
 using System.Diagnostics;
 using System.Drawing;
-using System.IO;
 using System.Threading;
 
 namespace ShareX.ScreenCaptureLib
@@ -109,7 +108,7 @@ namespace ShareX.ScreenCaptureLib
                 throw new Exception("Screen recorder cache path is empty.");
             }
 
-            FPS = outputType == ScreenRecordOutput.GIF ? options.GIFFPS : options.ScreenRecordFPS;
+            FPS = options.FPS;
             DurationSeconds = options.Duration;
             CaptureRectangle = captureRectangle;
             CachePath = options.OutputPath;
@@ -230,19 +229,16 @@ namespace ShareX.ScreenCaptureLib
             }
         }
 
-        public bool FFmpegEncodeAsGIF(string sourceFilePath, string targetFilePath, string tempFolder)
+        public bool FFmpegEncodeVideo(string input, string output)
         {
-            Helpers.CreateDirectoryFromFilePath(targetFilePath);
-            Helpers.CreateDirectoryFromDirectoryPath(tempFolder);
-            return ffmpegCli.EncodeGIF(sourceFilePath, targetFilePath, tempFolder);
+            Helpers.CreateDirectoryFromFilePath(output);
+            return ffmpegCli.EncodeVideo(input, output);
         }
 
-        public void EncodeUsingCommandLine(VideoEncoder encoder, string sourceFilePath, string targetFilePath)
+        public bool FFmpegEncodeAsGIF(string input, string output)
         {
-            if (!string.IsNullOrEmpty(sourceFilePath) && File.Exists(sourceFilePath))
-            {
-                encoder.Encode(sourceFilePath, targetFilePath);
-            }
+            Helpers.CreateDirectoryFromFilePath(output);
+            return ffmpegCli.EncodeGIF(input, output);
         }
 
         protected void OnRecordingStarted()

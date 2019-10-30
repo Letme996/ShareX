@@ -19,7 +19,7 @@ namespace ShareX.HistoryLib.Properties {
     // class via a tool like ResGen or Visual Studio.
     // To add or remove a member, edit your .ResX file then rerun ResGen
     // with the /str option, or rebuild your VS project.
-    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Resources.Tools.StronglyTypedResourceBuilder", "4.0.0.0")]
+    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Resources.Tools.StronglyTypedResourceBuilder", "15.0.0.0")]
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
     [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
     internal class Resources {
@@ -113,6 +113,15 @@ namespace ShareX.HistoryLib.Properties {
         internal static string HistoryItemManager_InitializeComponent_Deletion_URL {
             get {
                 return ResourceManager.GetString("HistoryItemManager_InitializeComponent_Deletion_URL", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Edit image....
+        /// </summary>
+        internal static string HistoryItemManager_InitializeComponent_EditImage {
+            get {
+                return ResourceManager.GetString("HistoryItemManager_InitializeComponent_EditImage", resourceCulture);
             }
         }
         
@@ -315,6 +324,15 @@ namespace ShareX.HistoryLib.Properties {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Upload file.
+        /// </summary>
+        internal static string HistoryItemManager_InitializeComponent_UploadFile {
+            get {
+                return ResourceManager.GetString("HistoryItemManager_InitializeComponent_UploadFile", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to URL.
         /// </summary>
         internal static string HistoryItemManager_InitializeComponent_URL {
@@ -372,6 +390,16 @@ namespace ShareX.HistoryLib.Properties {
         /// <summary>
         ///   Looks up a localized resource of type System.Drawing.Bitmap.
         /// </summary>
+        internal static System.Drawing.Bitmap magnifier {
+            get {
+                object obj = ResourceManager.GetObject("magnifier", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized resource of type System.Drawing.Bitmap.
+        /// </summary>
         internal static System.Drawing.Bitmap notebook {
             get {
                 object obj = ResourceManager.GetObject("notebook", resourceCulture);
@@ -412,6 +440,69 @@ namespace ShareX.HistoryLib.Properties {
         internal static string ObjectListView_ObjectListView_Value {
             get {
                 return ResourceManager.GetString("ObjectListView_ObjectListView_Value", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to BtnShowStats_ShowStats.
+        /// </summary>
+        internal static string BtnShowStats_ShowStats {
+            get {
+                return ResourceManager.GetString("BtnShowStats_ShowStats", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to BtnShowStats_HideStats.
+        /// </summary>
+        internal static string BtnShowStats_HideStats {
+            get {
+                return ResourceManager.GetString("BtnShowStats_HideStats", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to HistoryItemCounts.
+        /// </summary>
+        internal static string HistoryItemCounts {
+            get {
+                return ResourceManager.GetString("HistoryItemCounts", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to HistoryStats_Total.
+        /// </summary>
+        internal static string HistoryStats_Total {
+            get {
+                return ResourceManager.GetString("HistoryStats_Total", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to HistoryStats_YearlyUsages.
+        /// </summary>
+        internal static string HistoryStats_YearlyUsages {
+            get {
+                return ResourceManager.GetString("HistoryStats_YearlyUsages", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to HistoryStats_FileExtensions.
+        /// </summary>
+        internal static string HistoryStats_FileExtensions {
+            get {
+                return ResourceManager.GetString("HistoryStats_FileExtensions", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to HistoryStats_Hosts.
+        /// </summary>
+        internal static string HistoryStats_Hosts {
+            get {
+                return ResourceManager.GetString("HistoryStats_Hosts", resourceCulture);
             }
         }
     }

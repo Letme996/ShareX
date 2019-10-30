@@ -2,7 +2,7 @@
 
 /*
     ShareX - A program that allows you to take screenshots and share any file type
-    Copyright (c) 2007-2018 ShareX Team
+    Copyright (c) 2007-2019 ShareX Team
 
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License
@@ -26,13 +26,8 @@
 using ShareX.HelpersLib;
 using ShareX.ScreenCaptureLib.Properties;
 using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
 using System.Drawing;
-using System.IO;
 using System.Linq;
-using System.Text;
 using System.Windows.Forms;
 
 namespace ShareX.ScreenCaptureLib
@@ -45,28 +40,31 @@ namespace ShareX.ScreenCaptureLib
 
         public EditorStartupForm(RegionCaptureOptions options)
         {
-            InitializeComponent();
-            Icon = ShareXResources.Icon;
             Options = options;
+
+            InitializeComponent();
+            ShareXResources.ApplyTheme(this);
+        }
+
+        private void LoadImageFile(string imageFilePath)
+        {
+            if (!string.IsNullOrEmpty(imageFilePath))
+            {
+                Image = ImageHelpers.LoadImage(imageFilePath);
+
+                if (Image != null)
+                {
+                    ImageFilePath = imageFilePath;
+                    DialogResult = DialogResult.OK;
+                    Close();
+                }
+            }
         }
 
         private void btnOpenImageFile_Click(object sender, EventArgs e)
         {
-            string ImageFilePath = ImageHelpers.OpenImageFileDialog(this);
-
-            if (!string.IsNullOrEmpty(ImageFilePath) && File.Exists(ImageFilePath))
-            {
-                Image = ImageHelpers.LoadImage(ImageFilePath);
-
-                if (Image != null)
-                {
-                    DialogResult = DialogResult.OK;
-                    Close();
-                    return;
-                }
-            }
-
-            ImageFilePath = null;
+            string imageFilePath = ImageHelpers.OpenImageFileDialog(this);
+            LoadImageFile(imageFilePath);
         }
 
         private void btnLoadImageFromClipboard_Click(object sender, EventArgs e)
@@ -79,6 +77,15 @@ namespace ShareX.ScreenCaptureLib
                 {
                     DialogResult = DialogResult.OK;
                     Close();
+                }
+            }
+            else if (Clipboard.ContainsFileDropList())
+            {
+                string[] files = Clipboard.GetFileDropList().OfType<string>().Where(x => Helpers.IsImageFile(x)).ToArray();
+
+                if (files.Length > 0)
+                {
+                    LoadImageFile(files[0]);
                 }
             }
             else

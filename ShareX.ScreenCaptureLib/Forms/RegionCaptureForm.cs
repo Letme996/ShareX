@@ -2,7 +2,7 @@
 
 /*
     ShareX - A program that allows you to take screenshots and share any file type
-    Copyright (c) 2007-2018 ShareX Team
+    Copyright (c) 2007-2019 ShareX Team
 
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License
@@ -31,7 +31,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Linq;
-using System.Text;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace ShareX.ScreenCaptureLib
@@ -40,8 +40,8 @@ namespace ShareX.ScreenCaptureLib
     {
         public static GraphicsPath LastRegionFillPath { get; private set; }
 
-        public event Action<Image, string> SaveImageRequested;
-        public event Action<Image, string> SaveImageAsRequested;
+        public event Func<Image, string, string> SaveImageRequested;
+        public event Func<Image, string, string> SaveImageAsRequested;
         public event Action<Image> CopyImageRequested;
         public event Action<Image> UploadImageRequested;
         public event Action<Image> PrintImageRequested;
@@ -49,7 +49,7 @@ namespace ShareX.ScreenCaptureLib
         public RegionCaptureOptions Options { get; set; }
         public Rectangle ClientArea { get; private set; }
         public Image Canvas { get; private set; }
-        public Rectangle CanvasRectangle { get; private set; }
+        public Rectangle CanvasRectangle { get; internal set; }
         public RegionResult Result { get; private set; }
         public int FPS { get; private set; }
         public int MonitorIndex { get; set; }
@@ -59,7 +59,7 @@ namespace ShareX.ScreenCaptureLib
         public RegionCaptureMode Mode { get; private set; }
         public bool IsEditorMode => Mode == RegionCaptureMode.Editor || Mode == RegionCaptureMode.TaskEditor;
         public bool IsAnnotationMode => Mode == RegionCaptureMode.Annotation || IsEditorMode;
-        public bool IsAnnotated => ShapeManager != null && ShapeManager.IsAnnotated;
+        public bool IsModified => ShapeManager != null && ShapeManager.IsModified;
 
         public Point CurrentPosition { get; private set; }
         public Point PanningStrech = new Point();
@@ -100,12 +100,12 @@ namespace ShareX.ScreenCaptureLib
         private Font infoFont, infoFontMedium, infoFontBig;
         private Stopwatch timerStart, timerFPS;
         private int frameCount;
-        private bool pause, isKeyAllowed;
+        private bool pause, isKeyAllowed, forceClose;
         private RectangleAnimation regionAnimation;
         private TextAnimation editorPanTipAnimation;
         private Bitmap bmpBackgroundImage;
         private Cursor defaultCursor;
-        private ScrollbarManager scrollbarManager;
+        private Color canvasBackgroundColor;
 
         public RegionCaptureForm(RegionCaptureMode mode, RegionCaptureOptions options, Image canvas = null)
         {
@@ -129,19 +129,14 @@ namespace ShareX.ScreenCaptureLib
                 Duration = TimeSpan.FromMilliseconds(200)
             };
 
-            if (IsEditorMode)
+            if (IsEditorMode && Options.ShowEditorPanTip)
             {
-                scrollbarManager = new ScrollbarManager(this);
-
-                if (Options.ShowEditorPanTip)
+                editorPanTipAnimation = new TextAnimation()
                 {
-                    editorPanTipAnimation = new TextAnimation()
-                    {
-                        Duration = TimeSpan.FromMilliseconds(5000),
-                        FadeOutDuration = TimeSpan.FromMilliseconds(1000),
-                        Text = Resources.RegionCaptureForm_TipYouCanPanImageByHoldingMouseMiddleButtonAndDragging
-                    };
-                }
+                    Duration = TimeSpan.FromMilliseconds(5000),
+                    FadeOutDuration = TimeSpan.FromMilliseconds(1000),
+                    Text = Resources.RegionCaptureForm_TipYouCanPanImageByHoldingMouseMiddleButtonAndDragging
+                };
             }
 
             borderPen = new Pen(Color.Black);
@@ -155,7 +150,17 @@ namespace ShareX.ScreenCaptureLib
             textOuterBorderPen = new Pen(Color.FromArgb(150, Color.White));
             textInnerBorderPen = new Pen(Color.FromArgb(150, Color.FromArgb(0, 81, 145)));
             markerPen = new Pen(Color.FromArgb(200, Color.Red));
-            canvasBorderPen = new Pen(Color.FromArgb(30, Color.Black));
+
+            if (ShareXResources.UseDarkTheme)
+            {
+                canvasBackgroundColor = ShareXResources.Theme.BackgroundColor;
+                canvasBorderPen = new Pen(ShareXResources.Theme.BorderColor);
+            }
+            else
+            {
+                canvasBackgroundColor = Color.FromArgb(200, 200, 200);
+                canvasBorderPen = new Pen(Color.FromArgb(176, 176, 176));
+            }
 
             Prepare(canvas);
 
@@ -201,8 +206,8 @@ namespace ShareX.ScreenCaptureLib
                     if (Options.ImageEditorStartMode == ImageEditorStartMode.AutoSize)
                     {
                         int margin = 100;
-                        Size canvasWindowSize = new Size(Canvas.Width + SystemInformation.BorderSize.Width * 2 + margin,
-                            Canvas.Height + SystemInformation.CaptionHeight + SystemInformation.BorderSize.Height * 2 + margin);
+                        Size canvasWindowSize = new Size(Canvas.Width + (SystemInformation.BorderSize.Width * 2) + margin,
+                            Canvas.Height + SystemInformation.CaptionHeight + (SystemInformation.BorderSize.Height * 2) + margin);
                         canvasWindowSize = new Size(Math.Max(MinimumSize.Width, canvasWindowSize.Width), Math.Max(MinimumSize.Height, canvasWindowSize.Height));
 
                         if (canvasWindowSize.Width < activeScreenWorkingArea.Width && canvasWindowSize.Height < activeScreenWorkingArea.Height)
@@ -233,10 +238,11 @@ namespace ShareX.ScreenCaptureLib
 
             Shown += RegionCaptureForm_Shown;
             KeyDown += RegionCaptureForm_KeyDown;
-            KeyUp += RegionCaptureForm_KeyUp;
             MouseDown += RegionCaptureForm_MouseDown;
             Resize += RegionCaptureForm_Resize;
             LocationChanged += RegionCaptureForm_LocationChanged;
+            LostFocus += RegionCaptureForm_LostFocus;
+            GotFocus += RegionCaptureForm_GotFocus;
             FormClosing += RegionCaptureForm_FormClosing;
 
             ResumeLayout(false);
@@ -244,6 +250,8 @@ namespace ShareX.ScreenCaptureLib
 
         internal void UpdateTitle()
         {
+            if (forceClose) return;
+
             string text;
 
             if (IsEditorMode)
@@ -287,7 +295,7 @@ namespace ShareX.ScreenCaptureLib
             {
                 IntPtr handle = Handle;
 
-                TaskEx.Run(() =>
+                Task.Run(() =>
                 {
                     WindowsRectangleList wla = new WindowsRectangleList();
                     wla.IgnoreHandle = handle;
@@ -297,7 +305,7 @@ namespace ShareX.ScreenCaptureLib
             }
         }
 
-        internal void InitBackground(Image canvas)
+        internal void InitBackground(Image canvas, bool centerCanvas = true)
         {
             if (Canvas != null) Canvas.Dispose();
             if (backgroundBrush != null) backgroundBrush.Dispose();
@@ -316,7 +324,8 @@ namespace ShareX.ScreenCaptureLib
                 {
                     Rectangle sourceRect = new Rectangle(0, 0, Canvas.Width, Canvas.Height);
 
-                    using (Image checkers = ImageHelpers.DrawCheckers(Canvas.Width, Canvas.Height))
+                    using (Image checkers = ImageHelpers.DrawCheckers(Canvas.Width, Canvas.Height, ShareXResources.Theme.CheckerSize,
+                        ShareXResources.Theme.CheckerColor, ShareXResources.Theme.CheckerColor2))
                     {
                         g.DrawImage(checkers, sourceRect);
                     }
@@ -327,9 +336,12 @@ namespace ShareX.ScreenCaptureLib
                     backgroundBrush.TranslateTransform(CanvasRectangle.X, CanvasRectangle.Y);
                 }
 
-                CenterCanvas();
+                if (centerCanvas)
+                {
+                    CenterCanvas();
+                }
             }
-            else if (!IsEditorMode && Options.UseDimming)
+            else if (Options.UseDimming)
             {
                 using (Bitmap darkBackground = (Bitmap)Canvas.Clone())
                 using (Graphics g = Graphics.FromImage(darkBackground))
@@ -381,7 +393,7 @@ namespace ShareX.ScreenCaptureLib
 
             Rectangle limitRectangle = new Rectangle(
                 ClientArea.X + panLimitSize.Width, ClientArea.Y + panLimitSize.Height,
-                ClientArea.Width - panLimitSize.Width * 2, ClientArea.Height - panLimitSize.Height * 2);
+                ClientArea.Width - (panLimitSize.Width * 2), ClientArea.Height - (panLimitSize.Height * 2));
 
             deltaX = Math.Max(deltaX, limitRectangle.Left - CanvasRectangle.Right);
             deltaX = Math.Min(deltaX, limitRectangle.Right - CanvasRectangle.Left);
@@ -421,17 +433,17 @@ namespace ShareX.ScreenCaptureLib
         {
             if (IsEditorMode)
             {
-                int x = (int)Math.Round(ClientArea.Width * 0.5f + centerOffset.X);
-                int y = (int)Math.Round(ClientArea.Height * 0.5f + centerOffset.Y);
-                int newX = x - CanvasRectangle.Width / 2;
-                int newY = y - CanvasRectangle.Height / 2;
+                int x = (int)Math.Round((ClientArea.Width * 0.5f) + centerOffset.X);
+                int y = (int)Math.Round((ClientArea.Height * 0.5f) + centerOffset.Y);
+                int newX = x - (CanvasRectangle.Width / 2);
+                int newY = y - (CanvasRectangle.Height / 2);
                 int deltaX = newX - CanvasRectangle.X;
                 int deltaY = newY - CanvasRectangle.Y;
                 Pan(deltaX, deltaY, false);
             }
         }
 
-        private void AutomaticPan()
+        public void AutomaticPan()
         {
             AutomaticPan(CanvasCenterOffset);
         }
@@ -439,8 +451,8 @@ namespace ShareX.ScreenCaptureLib
         private void UpdateCenterOffset()
         {
             CanvasCenterOffset = new Vector2(
-                (CanvasRectangle.X + CanvasRectangle.Width / 2f) - ClientArea.Width / 2f,
-                (CanvasRectangle.Y + CanvasRectangle.Height / 2f) - ClientArea.Height / 2f);
+                (CanvasRectangle.X + (CanvasRectangle.Width / 2f)) - (ClientArea.Width / 2f),
+                (CanvasRectangle.Y + (CanvasRectangle.Height / 2f)) - (ClientArea.Height / 2f));
         }
 
         public void CenterCanvas()
@@ -481,29 +493,62 @@ namespace ShareX.ScreenCaptureLib
             OnMoved();
         }
 
+        private void RegionCaptureForm_GotFocus(object sender, EventArgs e)
+        {
+            Resume();
+        }
+
+        private void RegionCaptureForm_LostFocus(object sender, EventArgs e)
+        {
+            Pause();
+        }
+
         private void RegionCaptureForm_FormClosing(object sender, FormClosingEventArgs e)
         {
-            if (IsEditorMode && Options.ImageEditorStartMode == ImageEditorStartMode.PreviousState)
+            if (IsEditorMode)
             {
-                Options.ImageEditorWindowState.UpdateFormState(this);
+                if (e.CloseReason == CloseReason.UserClosing && !forceClose && !IsFullscreen && !ShowExitConfirmation())
+                {
+                    e.Cancel = true;
+                    return;
+                }
+
+                if (Options.ImageEditorStartMode == ImageEditorStartMode.PreviousState)
+                {
+                    Options.ImageEditorWindowState.UpdateFormState(this);
+                }
             }
+        }
+
+        internal bool ShowExitConfirmation()
+        {
+            bool result = true;
+
+            if (IsModified)
+            {
+                Pause();
+                result = MessageBox.Show(this, Resources.RegionCaptureForm_ShowExitConfirmation_Text, Resources.RegionCaptureForm_ShowExitConfirmation_ShareXImageEditor,
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
+                Resume();
+            }
+
+            return result;
         }
 
         internal void RegionCaptureForm_KeyDown(object sender, KeyEventArgs e)
         {
-            switch (e.KeyData)
-            {
-                case Keys.Control | Keys.C:
-                    CopyAreaInfo();
-                    break;
-            }
-        }
-
-        internal void RegionCaptureForm_KeyUp(object sender, KeyEventArgs e)
-        {
             if (e.KeyData == Keys.Escape)
             {
-                Close();
+                if (ShapeManager.HandleEscape())
+                {
+                    return;
+                }
+
+                if (!IsEditorMode || ShowExitConfirmation())
+                {
+                    CloseWindow();
+                }
+
                 return;
             }
 
@@ -514,23 +559,26 @@ namespace ShareX.ScreenCaptureLib
 
             isKeyAllowed = true;
 
-            if (e.KeyData >= Keys.D0 && e.KeyData <= Keys.D9)
-            {
-                MonitorKey(e.KeyData - Keys.D0);
-                return;
-            }
-
             switch (e.KeyData)
             {
                 case Keys.Space:
-                    Close(RegionResult.Fullscreen);
+                    CloseWindow(RegionResult.Fullscreen);
                     break;
                 case Keys.Enter:
-                    Close(RegionResult.Region);
+                    CloseWindow(RegionResult.Region);
                     break;
                 case Keys.Oemtilde:
-                    Close(RegionResult.ActiveMonitor);
+                    CloseWindow(RegionResult.ActiveMonitor);
                     break;
+                case Keys.Control | Keys.C:
+                    CopyAreaInfo();
+                    break;
+            }
+
+            if (!IsEditorMode && e.KeyData >= Keys.D0 && e.KeyData <= Keys.D9)
+            {
+                MonitorKey(e.KeyData - Keys.D0);
+                return;
             }
         }
 
@@ -545,7 +593,7 @@ namespace ShareX.ScreenCaptureLib
                     SelectedWindow = ShapeManager.FindSelectedWindow();
                 }
 
-                Close(RegionResult.Region);
+                CloseWindow(RegionResult.Region);
             }
         }
 
@@ -560,13 +608,13 @@ namespace ShareX.ScreenCaptureLib
 
             MonitorIndex = index;
 
-            Close(RegionResult.Monitor);
+            CloseWindow(RegionResult.Monitor);
         }
 
-        internal void Close(RegionResult result)
+        internal void CloseWindow(RegionResult result = RegionResult.Close)
         {
             Result = result;
-
+            forceClose = true;
             Close();
         }
 
@@ -640,11 +688,6 @@ namespace ShareX.ScreenCaptureLib
             borderDotPen.DashOffset = (float)timerStart.Elapsed.TotalSeconds * -15;
 
             ShapeManager.Update();
-
-            if (scrollbarManager != null)
-            {
-                scrollbarManager.Update();
-            }
         }
 
         protected override void OnPaintBackground(PaintEventArgs e)
@@ -660,7 +703,7 @@ namespace ShareX.ScreenCaptureLib
 
             if (IsEditorMode && !CanvasRectangle.Contains(ClientArea))
             {
-                g.Clear(Options.ImageEditorBackgroundColor);
+                g.Clear(canvasBackgroundColor);
                 g.DrawRectangleProper(canvasBorderPen, CanvasRectangle.Offset(1));
             }
 
@@ -815,12 +858,6 @@ namespace ShareX.ScreenCaptureLib
             // Draw resize nodes
             ShapeManager.DrawObjects(g);
 
-            // Draw F1 tips
-            if (!IsEditorMode && Options.ShowHotkeys)
-            {
-                DrawTips(g);
-            }
-
             // Draw magnifier
             if (Options.ShowMagnifier || Options.ShowInfo)
             {
@@ -843,12 +880,6 @@ namespace ShareX.ScreenCaptureLib
             if (IsAnnotationMode && ShapeManager.MenuTextAnimation.Update())
             {
                 DrawTextAnimation(g, ShapeManager.MenuTextAnimation);
-            }
-
-            // Draw scroll bars
-            if (scrollbarManager != null)
-            {
-                scrollbarManager.Draw(g);
             }
         }
 
@@ -899,17 +930,28 @@ namespace ShareX.ScreenCaptureLib
 
         private void DrawInfoText(Graphics g, string text, Rectangle rect, Font font, int padding)
         {
+            DrawInfoText(g, text, rect, font, new Point(padding, padding));
+        }
+
+        private void DrawInfoText(Graphics g, string text, Rectangle rect, Font font, Point padding)
+        {
             DrawInfoText(g, text, rect, font, padding, textBackgroundBrush, textOuterBorderPen, textInnerBorderPen, Brushes.White, Brushes.Black);
         }
 
         private void DrawInfoText(Graphics g, string text, Rectangle rect, Font font, int padding,
             Brush backgroundBrush, Pen outerBorderPen, Pen innerBorderPen, Brush textBrush, Brush textShadowBrush)
         {
+            DrawInfoText(g, text, rect, font, new Point(padding, padding), backgroundBrush, outerBorderPen, innerBorderPen, textBrush, textShadowBrush);
+        }
+
+        private void DrawInfoText(Graphics g, string text, Rectangle rect, Font font, Point padding,
+            Brush backgroundBrush, Pen outerBorderPen, Pen innerBorderPen, Brush textBrush, Brush textShadowBrush)
+        {
             g.FillRectangle(backgroundBrush, rect.Offset(-2));
             g.DrawRectangleProper(innerBorderPen, rect.Offset(-1));
             g.DrawRectangleProper(outerBorderPen, rect);
 
-            g.DrawTextWithShadow(text, rect.Offset(-padding).Location, font, textBrush, textShadowBrush);
+            g.DrawTextWithShadow(text, rect.LocationOffset(padding.X, padding.Y).Location, font, textBrush, textShadowBrush);
         }
 
         internal void DrawAreaText(Graphics g, string text, Rectangle area)
@@ -919,7 +961,7 @@ namespace ShareX.ScreenCaptureLib
             Size textSize = g.MeasureString(text, infoFont).ToSize();
             Point textPos;
 
-            if (area.Y - offset - textSize.Height - backgroundPadding * 2 < ClientArea.Y)
+            if (area.Y - offset - textSize.Height - (backgroundPadding * 2) < ClientArea.Y)
             {
                 textPos = new Point(area.X + offset + backgroundPadding, area.Y + offset + backgroundPadding);
             }
@@ -933,31 +975,9 @@ namespace ShareX.ScreenCaptureLib
                 textPos.X = ClientArea.Width - textSize.Width - backgroundPadding;
             }
 
-            Rectangle backgroundRect = new Rectangle(textPos.X - backgroundPadding, textPos.Y - backgroundPadding, textSize.Width + backgroundPadding * 2, textSize.Height + backgroundPadding * 2);
+            Rectangle backgroundRect = new Rectangle(textPos.X - backgroundPadding, textPos.Y - backgroundPadding, textSize.Width + (backgroundPadding * 2), textSize.Height + (backgroundPadding * 2));
 
             DrawInfoText(g, text, backgroundRect, infoFont, backgroundPadding);
-        }
-
-        private void DrawTips(Graphics g)
-        {
-            StringBuilder sb = new StringBuilder();
-            WriteTips(sb);
-            string tipText = sb.ToString().Trim();
-
-            Size textSize = g.MeasureString(tipText, infoFont).ToSize();
-            int offset = 10;
-            int padding = 10;
-            int rectWidth = textSize.Width + padding * 2 + 2;
-            int rectHeight = textSize.Height + padding * 2;
-            Rectangle screenBounds = CaptureHelpers.GetActiveScreenBounds0Based();
-            Rectangle textRectangle = new Rectangle(screenBounds.X + screenBounds.Width - rectWidth - offset, screenBounds.Y + offset, rectWidth, rectHeight);
-
-            if (textRectangle.Offset(10).Contains(InputManager.ClientMousePosition))
-            {
-                textRectangle.Y = screenBounds.Height - rectHeight - offset;
-            }
-
-            DrawInfoText(g, tipText, textRectangle, infoFont, padding);
         }
 
         private void DrawTextAnimation(Graphics g, TextAnimation textAnimation)
@@ -989,142 +1009,8 @@ namespace ShareX.ScreenCaptureLib
             textSize.Width += padding * 2;
             textSize.Height += padding * 2;
             int margin = 20;
-            Rectangle textRectangle = new Rectangle(ClientArea.Width / 2 - textSize.Width / 2, ClientArea.Height - textSize.Height - margin, textSize.Width, textSize.Height);
+            Rectangle textRectangle = new Rectangle((ClientArea.Width / 2) - (textSize.Width / 2), ClientArea.Height - textSize.Height - margin, textSize.Width, textSize.Height);
             DrawTextAnimation(g, textAnimation, textRectangle, padding);
-        }
-
-        private void WriteTips(StringBuilder sb)
-        {
-            sb.AppendLine(Resources.RectangleRegion_WriteTips__F1__Hide_tips);
-            sb.AppendLine();
-
-            if (ShapeManager.IsCreating)
-            {
-                sb.AppendLine(Resources.RectangleRegion_WriteTips__Insert__Stop_region_selection);
-                sb.AppendLine(Resources.RectangleRegion_WriteTips__Right_click__Cancel_region_selection);
-            }
-            else
-            {
-                sb.AppendLine(Resources.RectangleRegion_WriteTips__Hold_Left_click__Start_region_selection);
-                sb.AppendLine(Resources.RegionCaptureForm_WriteTips_RightClickCancelCaptureRemoveRegion);
-            }
-
-            sb.AppendLine(Resources.RectangleRegion_WriteTips__Esc__Cancel_capture);
-
-            if (!ShapeManager.IsCreating && !Options.QuickCrop && ShapeManager.Regions.Length > 0)
-            {
-                sb.AppendLine(Resources.RectangleRegion_WriteTips__Double_Left_click___Enter__Capture_regions);
-            }
-
-            sb.AppendLine();
-
-            if ((!Options.QuickCrop || !ShapeManager.IsCurrentShapeTypeRegion) && ShapeManager.CurrentShape != null && !ShapeManager.IsCreating)
-            {
-                sb.AppendLine(Resources.RectangleRegion_WriteTips__Right_click_on_selection___Delete__Remove_region);
-                sb.AppendLine(Resources.RegionCaptureForm_WriteTips_ArrowKeysResizeRegionFromBottomRightCorner);
-                sb.AppendLine(Resources.RegionCaptureForm_WriteTips_HoldAltArrowKeysResizeRegionFromTopLeftCorner);
-                sb.AppendLine(Resources.RectangleRegionForm_WriteTips__Hold_Ctrl___Arrow_keys__Move_region);
-                sb.AppendLine(Resources.RectangleRegionForm_WriteTips__Hold_Shift___Arrow_keys__Resize_or_move_region_faster);
-                sb.AppendLine(Resources.RectangleRegion_WriteTips__Hold_Left_click_on_selection__Move_region);
-            }
-            else
-            {
-                sb.AppendLine(Resources.RectangleRegion_WriteTips__Arrow_keys__Move_cursor_position);
-                sb.AppendLine(Resources.RectangleRegionForm_WriteTips__Hold_Shift___Arrow_keys__Move_cursor_position_faster);
-            }
-
-            if (ShapeManager.IsCreating)
-            {
-                sb.AppendLine(Resources.RectangleRegionForm_WriteTips__Hold_Ctrl__Move_selection);
-                sb.AppendLine(Resources.RectangleRegion_WriteTips__Hold_Shift__Proportional_resizing);
-
-                if (ShapeManager.CurrentTool != ShapeType.RegionFreehand && ShapeManager.CurrentTool != ShapeType.DrawingFreehand)
-                {
-                    sb.AppendLine(Resources.RectangleRegion_WriteTips__Hold_Alt__Snap_resizing_to_preset_sizes);
-                }
-            }
-
-            if (ShapeManager.Shapes.Count > 0)
-            {
-                sb.AppendLine(Resources.RegionCaptureForm_WriteTips_CtrlZUndoShape);
-            }
-
-            sb.AppendLine();
-
-            if (ShapeManager.IsCurrentShapeValid)
-            {
-                sb.AppendLine(Resources.RectangleRegion_WriteTips__Ctrl___C__Copy_position_and_size);
-            }
-            else if (Options.UseCustomInfoText)
-            {
-                sb.AppendLine(Resources.RectangleRegion_WriteTips__Ctrl___C__Copy_info);
-            }
-            else
-            {
-                sb.AppendLine(Resources.RectangleRegion_WriteTips__Ctrl___C__Copy_position);
-            }
-
-            if (IsAnnotationMode)
-            {
-                sb.AppendLine(Resources.RegionCaptureForm_WriteTips_CtrlVPasteImageOrText);
-            }
-
-            sb.AppendLine(Resources.RectangleRegionForm_WriteTips__Mouse_wheel__Change_current_tool);
-
-            sb.AppendLine();
-
-            sb.AppendLine(Resources.RectangleRegion_WriteTips__Space__Fullscreen_capture);
-            sb.AppendLine(Resources.RectangleRegion_WriteTips__1__2__3_____0__Monitor_capture);
-            sb.AppendLine(Resources.RectangleRegion_WriteTips_____Active_monitor_capture);
-
-            if (Mode == RegionCaptureMode.Annotation && !ShapeManager.IsCreating)
-            {
-                sb.AppendLine();
-
-                if (ShapeManager.IsCurrentShapeTypeRegion)
-                {
-                    sb.AppendLine(Resources.RectangleRegionForm_WriteTips__Tab___Mouse_4_click__Select_last_annotation_tool);
-                }
-                else
-                {
-                    sb.AppendLine(Resources.RectangleRegionForm_WriteTips__Tab___Mouse_4_click__Select_last_region_tool);
-                }
-
-                sb.AppendLine(Resources.RectangleRegionForm_WriteTips__Ctrl___Mouse_wheel__Change_magnifier_size);
-                if (ShapeManager.CurrentTool == ShapeType.RegionRectangle) sb.Append("-> ");
-                sb.AppendLine(string.Format("[{0}] {1}", "Numpad 0", ShapeType.RegionRectangle.GetLocalizedDescription()));
-                if (ShapeManager.CurrentTool == ShapeType.RegionEllipse) sb.Append("-> ");
-                sb.AppendLine(ShapeType.RegionEllipse.GetLocalizedDescription());
-                if (ShapeManager.CurrentTool == ShapeType.RegionFreehand) sb.Append("-> ");
-                sb.AppendLine(ShapeType.RegionFreehand.GetLocalizedDescription());
-                if (ShapeManager.CurrentTool == ShapeType.DrawingRectangle) sb.Append("-> ");
-                sb.AppendLine(string.Format("[{0}] {1}", "Numpad 1", ShapeType.DrawingRectangle.GetLocalizedDescription()));
-                if (ShapeManager.CurrentTool == ShapeType.DrawingEllipse) sb.Append("-> ");
-                sb.AppendLine(string.Format("[{0}] {1}", "Numpad 2", ShapeType.DrawingEllipse.GetLocalizedDescription()));
-                if (ShapeManager.CurrentTool == ShapeType.DrawingFreehand) sb.Append("-> ");
-                sb.AppendLine(string.Format("[{0}] {1}", "Numpad 3", ShapeType.DrawingFreehand.GetLocalizedDescription()));
-                if (ShapeManager.CurrentTool == ShapeType.DrawingLine) sb.Append("-> ");
-                sb.AppendLine(string.Format("[{0}] {1}", "Numpad 4", ShapeType.DrawingLine.GetLocalizedDescription()));
-                if (ShapeManager.CurrentTool == ShapeType.DrawingArrow) sb.Append("-> ");
-                sb.AppendLine(string.Format("[{0}] {1}", "Numpad 5", ShapeType.DrawingArrow.GetLocalizedDescription()));
-                if (ShapeManager.CurrentTool == ShapeType.DrawingTextOutline) sb.Append("-> ");
-                sb.AppendLine(string.Format("[{0}] {1}", "Numpad 6", ShapeType.DrawingTextOutline.GetLocalizedDescription()));
-                if (ShapeManager.CurrentTool == ShapeType.DrawingSpeechBalloon) sb.Append("-> ");
-                sb.AppendLine(ShapeType.DrawingSpeechBalloon.GetLocalizedDescription());
-                if (ShapeManager.CurrentTool == ShapeType.DrawingStep) sb.Append("-> ");
-                sb.AppendLine(string.Format("[{0}] {1}", "Numpad 7", ShapeType.DrawingStep.GetLocalizedDescription()));
-                if (ShapeManager.CurrentTool == ShapeType.DrawingImage) sb.Append("-> ");
-                sb.AppendLine(ShapeType.DrawingImage.GetLocalizedDescription());
-                if (ShapeManager.CurrentTool == ShapeType.EffectBlur) sb.Append("-> ");
-                sb.AppendLine(string.Format("[{0}] {1}", "Numpad 8", ShapeType.EffectBlur.GetLocalizedDescription()));
-                if (ShapeManager.CurrentTool == ShapeType.EffectPixelate) sb.Append("-> ");
-                sb.AppendLine(string.Format("[{0}] {1}", "Numpad 9", ShapeType.EffectPixelate.GetLocalizedDescription()));
-                if (ShapeManager.CurrentTool == ShapeType.EffectHighlight) sb.Append("-> ");
-                sb.AppendLine(ShapeType.EffectHighlight.GetLocalizedDescription());
-            }
-
-            sb.AppendLine();
-            sb.AppendLine(Resources.RegionCaptureForm_WriteTips_NoteHidingTheseTipsWillIncreaseFPSGreatly);
         }
 
         internal string GetAreaText(Rectangle area)
@@ -1234,7 +1120,7 @@ namespace ShareX.ScreenCaptureLib
                 CurrentPosition = InputManager.MousePosition;
                 infoText = GetInfoText();
                 Size textSize = g.MeasureString(infoText, infoFont).ToSize();
-                infoTextRect.Size = new Size(textSize.Width + infoTextPadding * 2, textSize.Height + infoTextPadding * 2);
+                infoTextRect.Size = new Size(textSize.Width + (infoTextPadding * 2), textSize.Height + (infoTextPadding * 2));
                 totalSize.Width = Math.Max(totalSize.Width, infoTextRect.Width);
 
                 totalSize.Height += infoTextRect.Height;
@@ -1280,15 +1166,39 @@ namespace ShareX.ScreenCaptureLib
             if (Options.ShowInfo)
             {
                 infoTextRect.Location = new Point(x + (totalSize.Width / 2) - (infoTextRect.Width / 2), y + infoTextPosition);
-                DrawInfoText(g, infoText, infoTextRect, infoFont, infoTextPadding);
+
+                Point padding = new Point(infoTextPadding, infoTextPadding);
+                Rectangle colorRect = Rectangle.Empty;
+
+                if (Mode == RegionCaptureMode.ScreenColorPicker)
+                {
+                    int colorBoxOffset = 3;
+                    int colorBoxWidth = 15;
+                    colorRect = new Rectangle(infoTextRect.X + colorBoxOffset, infoTextRect.Y + colorBoxOffset, colorBoxWidth, infoTextRect.Height - (colorBoxOffset * 2));
+                    int colorExtraWidth = colorRect.Width + colorBoxOffset;
+                    infoTextRect.Width += colorExtraWidth;
+                    padding.X += colorExtraWidth;
+                }
+
+                DrawInfoText(g, infoText, infoTextRect, infoFont, padding);
+
+                if (Mode == RegionCaptureMode.ScreenColorPicker)
+                {
+                    using (Brush colorBrush = new SolidBrush(CurrentColor))
+                    {
+                        g.FillRectangle(colorBrush, colorRect);
+                    }
+
+                    g.DrawRectangleProper(Pens.White, colorRect);
+                }
             }
         }
 
         private Bitmap Magnifier(Image img, Point position, int horizontalPixelCount, int verticalPixelCount, int pixelSize)
         {
-            horizontalPixelCount = (horizontalPixelCount | 1).Between(1, 101);
-            verticalPixelCount = (verticalPixelCount | 1).Between(1, 101);
-            pixelSize = pixelSize.Between(1, 1000);
+            horizontalPixelCount = (horizontalPixelCount | 1).Clamp(1, 101);
+            verticalPixelCount = (verticalPixelCount | 1).Clamp(1, 101);
+            pixelSize = pixelSize.Clamp(1, 1000);
 
             if (horizontalPixelCount * pixelSize > ClientArea.Width || verticalPixelCount * pixelSize > ClientArea.Height)
             {
@@ -1305,8 +1215,8 @@ namespace ShareX.ScreenCaptureLib
                 g.InterpolationMode = InterpolationMode.NearestNeighbor;
                 g.PixelOffsetMode = PixelOffsetMode.Half;
 
-                g.DrawImage(img, new Rectangle(0, 0, width, height), new Rectangle(position.X - horizontalPixelCount / 2 - CanvasRectangle.X,
-                    position.Y - verticalPixelCount / 2 - CanvasRectangle.Y, horizontalPixelCount, verticalPixelCount), GraphicsUnit.Pixel);
+                g.DrawImage(img, new Rectangle(0, 0, width, height), new Rectangle(position.X - (horizontalPixelCount / 2) - CanvasRectangle.X,
+                    position.Y - (verticalPixelCount / 2) - CanvasRectangle.Y, horizontalPixelCount, verticalPixelCount), GraphicsUnit.Pixel);
 
                 g.PixelOffsetMode = PixelOffsetMode.None;
 
@@ -1322,16 +1232,16 @@ namespace ShareX.ScreenCaptureLib
                 {
                     for (int x = 1; x < horizontalPixelCount; x++)
                     {
-                        g.DrawLine(pen, new Point(x * pixelSize - 1, 0), new Point(x * pixelSize - 1, height - 1));
+                        g.DrawLine(pen, new Point((x * pixelSize) - 1, 0), new Point((x * pixelSize) - 1, height - 1));
                     }
 
                     for (int y = 1; y < verticalPixelCount; y++)
                     {
-                        g.DrawLine(pen, new Point(0, y * pixelSize - 1), new Point(width - 1, y * pixelSize - 1));
+                        g.DrawLine(pen, new Point(0, (y * pixelSize) - 1), new Point(width - 1, (y * pixelSize) - 1));
                     }
                 }
 
-                g.DrawRectangle(Pens.Black, (width - pixelSize) / 2 - 1, (height - pixelSize) / 2 - 1, pixelSize, pixelSize);
+                g.DrawRectangle(Pens.Black, ((width - pixelSize) / 2) - 1, ((height - pixelSize) / 2) - 1, pixelSize, pixelSize);
 
                 if (pixelSize >= 6)
                 {
@@ -1348,14 +1258,14 @@ namespace ShareX.ScreenCaptureLib
             {
                 for (int x = 1; x <= rect.Width / rulerWidth; x++)
                 {
-                    g.DrawLine(pen, new Point(rect.X + x * rulerWidth, rect.Y), new Point(rect.X + x * rulerWidth, rect.Y + rulerSize));
-                    g.DrawLine(pen, new Point(rect.X + x * rulerWidth, rect.Bottom), new Point(rect.X + x * rulerWidth, rect.Bottom - rulerSize));
+                    g.DrawLine(pen, new Point(rect.X + (x * rulerWidth), rect.Y), new Point(rect.X + (x * rulerWidth), rect.Y + rulerSize));
+                    g.DrawLine(pen, new Point(rect.X + (x * rulerWidth), rect.Bottom), new Point(rect.X + (x * rulerWidth), rect.Bottom - rulerSize));
                 }
 
                 for (int y = 1; y <= rect.Height / rulerWidth; y++)
                 {
-                    g.DrawLine(pen, new Point(rect.X, rect.Y + y * rulerWidth), new Point(rect.X + rulerSize, rect.Y + y * rulerWidth));
-                    g.DrawLine(pen, new Point(rect.Right, rect.Y + y * rulerWidth), new Point(rect.Right - rulerSize, rect.Y + y * rulerWidth));
+                    g.DrawLine(pen, new Point(rect.X, rect.Y + (y * rulerWidth)), new Point(rect.X + rulerSize, rect.Y + (y * rulerWidth)));
+                    g.DrawLine(pen, new Point(rect.Right, rect.Y + (y * rulerWidth)), new Point(rect.Right - rulerSize, rect.Y + (y * rulerWidth)));
                 }
             }
         }
@@ -1445,20 +1355,32 @@ namespace ShareX.ScreenCaptureLib
             return null;
         }
 
+        private Image ReceiveImageForTask()
+        {
+            Image img = GetResultImage();
+
+            ShapeManager.IsModified = false;
+
+            if (Options.AutoCloseEditorOnTask)
+            {
+                CloseWindow();
+            }
+
+            return img;
+        }
+
         internal void OnSaveImageRequested()
         {
             if (SaveImageRequested != null)
             {
-                Image img = GetResultImage();
+                Image img = ReceiveImageForTask();
 
-                if (Options.AutoCloseEditorOnTask)
+                string imageFilePath = SaveImageRequested(img, ImageFilePath);
+
+                if (!string.IsNullOrEmpty(imageFilePath))
                 {
-                    Close();
-                    TaskEx.Run(() => SaveImageRequested(img, ImageFilePath));
-                }
-                else
-                {
-                    SaveImageRequested(img, ImageFilePath);
+                    ImageFilePath = imageFilePath;
+                    UpdateTitle();
                 }
             }
         }
@@ -1467,16 +1389,14 @@ namespace ShareX.ScreenCaptureLib
         {
             if (SaveImageAsRequested != null)
             {
-                Image img = GetResultImage();
+                Image img = ReceiveImageForTask();
 
-                if (Options.AutoCloseEditorOnTask)
+                string imageFilePath = SaveImageAsRequested(img, ImageFilePath);
+
+                if (!string.IsNullOrEmpty(imageFilePath))
                 {
-                    Close();
-                    TaskEx.Run(() => SaveImageAsRequested(img, ImageFilePath));
-                }
-                else
-                {
-                    SaveImageAsRequested(img, ImageFilePath);
+                    ImageFilePath = imageFilePath;
+                    UpdateTitle();
                 }
             }
         }
@@ -1485,17 +1405,9 @@ namespace ShareX.ScreenCaptureLib
         {
             if (CopyImageRequested != null)
             {
-                Image img = GetResultImage();
+                Image img = ReceiveImageForTask();
 
-                if (Options.AutoCloseEditorOnTask)
-                {
-                    Close();
-                    TaskEx.Run(() => CopyImageRequested(img));
-                }
-                else
-                {
-                    CopyImageRequested(img);
-                }
+                CopyImageRequested(img);
             }
         }
 
@@ -1503,17 +1415,9 @@ namespace ShareX.ScreenCaptureLib
         {
             if (UploadImageRequested != null)
             {
-                Image img = GetResultImage();
+                Image img = ReceiveImageForTask();
 
-                if (Options.AutoCloseEditorOnTask)
-                {
-                    Close();
-                    TaskEx.Run(() => UploadImageRequested(img));
-                }
-                else
-                {
-                    UploadImageRequested(img);
-                }
+                UploadImageRequested(img);
             }
         }
 
@@ -1521,17 +1425,9 @@ namespace ShareX.ScreenCaptureLib
         {
             if (PrintImageRequested != null)
             {
-                Image img = GetResultImage();
+                Image img = ReceiveImageForTask();
 
-                if (Options.AutoCloseEditorOnTask)
-                {
-                    Close();
-                    TaskEx.Run(() => PrintImageRequested(img));
-                }
-                else
-                {
-                    PrintImageRequested(img);
-                }
+                PrintImageRequested(img);
             }
         }
 

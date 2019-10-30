@@ -2,7 +2,7 @@
 
 /*
     ShareX - A program that allows you to take screenshots and share any file type
-    Copyright (c) 2007-2018 ShareX Team
+    Copyright (c) 2007-2019 ShareX Team
 
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License
@@ -24,11 +24,7 @@
 #endregion License Information (GPL v3)
 
 using ShareX.HelpersLib;
-using System;
-using System.Collections.Generic;
 using System.Drawing;
-using System.Linq;
-using System.Text;
 using System.Windows.Forms;
 
 namespace ShareX.ScreenCaptureLib
@@ -50,7 +46,37 @@ namespace ShareX.ScreenCaptureLib
         {
         }
 
-        private void OpenStickerForm(bool creating)
+        public override void OnCreating()
+        {
+            Point pos = InputManager.ClientMousePosition;
+            Rectangle = new Rectangle(pos.X, pos.Y, 1, 1);
+
+            if (Manager.IsCtrlModifier && LoadSticker(AnnotationOptions.LastStickerPath, AnnotationOptions.StickerSize))
+            {
+                OnCreated();
+                Manager.IsMoving = true;
+            }
+            else if (OpenStickerForm())
+            {
+                OnCreated();
+            }
+            else
+            {
+                Remove();
+            }
+        }
+
+        public override void OnDoubleClicked()
+        {
+            OpenStickerForm();
+        }
+
+        public override void Resize(int x, int y, bool fromBottomRight)
+        {
+            Move(x, y);
+        }
+
+        private bool OpenStickerForm()
         {
             Manager.Form.Pause();
 
@@ -58,59 +84,42 @@ namespace ShareX.ScreenCaptureLib
             {
                 using (StickerForm stickerForm = new StickerForm(AnnotationOptions.StickerPacks, AnnotationOptions.SelectedStickerPack, AnnotationOptions.StickerSize))
                 {
-                    if (stickerForm.ShowDialog() == DialogResult.OK)
+                    if (stickerForm.ShowDialog(Manager.Form) == DialogResult.OK)
                     {
                         AnnotationOptions.SelectedStickerPack = stickerForm.SelectedStickerPack;
                         AnnotationOptions.StickerSize = stickerForm.StickerSize;
 
-                        if (!string.IsNullOrEmpty(stickerForm.SelectedImageFile))
-                        {
-                            Image img = ImageHelpers.LoadImage(stickerForm.SelectedImageFile);
-
-                            img = ImageHelpers.ResizeImageLimit(img, stickerForm.StickerSize);
-
-                            if (img != null)
-                            {
-                                SetImage(img, true);
-
-                                if (creating)
-                                {
-                                    OnCreated();
-                                }
-
-                                return;
-                            }
-                        }
+                        return LoadSticker(stickerForm.SelectedImageFile, stickerForm.StickerSize);
                     }
-                }
-
-                if (creating)
-                {
-                    Remove();
                 }
             }
             finally
             {
                 Manager.Form.Resume();
             }
+
+            return false;
         }
 
-        public override void OnCreating()
+        private bool LoadSticker(string filePath, int stickerSize)
         {
-            Point pos = InputManager.ClientMousePosition;
-            Rectangle = new Rectangle(pos.X, pos.Y, 1, 1);
+            if (!string.IsNullOrEmpty(filePath))
+            {
+                Image img = ImageHelpers.LoadImage(filePath);
 
-            OpenStickerForm(true);
-        }
+                if (img != null)
+                {
+                    AnnotationOptions.LastStickerPath = filePath;
 
-        public override void OnDoubleClicked()
-        {
-            OpenStickerForm(false);
-        }
+                    img = ImageHelpers.ResizeImageLimit(img, stickerSize);
 
-        public override void Resize(int x, int y, bool fromBottomRight)
-        {
-            Move(x, y);
+                    SetImage(img, true);
+
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 }

@@ -2,7 +2,7 @@
 
 /*
     ShareX - A program that allows you to take screenshots and share any file type
-    Copyright (c) 2007-2018 ShareX Team
+    Copyright (c) 2007-2019 ShareX Team
 
     This program is free software; you can redistribute it and/or
     modify it under the terms of the GNU General Public License
@@ -92,39 +92,22 @@ namespace ShareX.ScreenCaptureLib
             }
         }
 
-        public bool EncodeGIF(string input, string output, string tempFolder)
+        public bool EncodeVideo(string input, string output)
         {
-            bool result;
+            Options.IsRecording = false;
+            Options.IsLossless = false;
+            Options.InputPath = input;
+            Options.OutputPath = output;
+            return Run(Options.FFmpeg.FFmpegPath, Options.GetFFmpegCommands());
+        }
 
-            string palettePath = Path.Combine(tempFolder, "FFmpeg-palette.png");
-
-            try
-            {
-                // https://ffmpeg.org/ffmpeg-filters.html#palettegen-1
-                result = Run(Options.FFmpeg.FFmpegPath, string.Format("-y -i \"{0}\" -vf \"palettegen=stats_mode={2}\" \"{1}\"", input, palettePath, Options.FFmpeg.GIFStatsMode));
-
-                if (result)
-                {
-                    if (File.Exists(palettePath))
-                    {
-                        // https://ffmpeg.org/ffmpeg-filters.html#paletteuse
-                        result = Run(Options.FFmpeg.FFmpegPath, string.Format("-y -i \"{0}\" -i \"{1}\" -lavfi \"paletteuse=dither={3}\" \"{2}\"", input, palettePath, output, Options.FFmpeg.GIFDither));
-                    }
-                    else
-                    {
-                        result = false;
-                    }
-                }
-            }
-            finally
-            {
-                if (File.Exists(palettePath))
-                {
-                    File.Delete(palettePath);
-                }
-            }
-
-            return result;
+        public bool EncodeGIF(string input, string output)
+        {
+            // https://ffmpeg.org/ffmpeg-filters.html#palettegen-1
+            // https://ffmpeg.org/ffmpeg-filters.html#paletteuse
+            return Run(Options.FFmpeg.FFmpegPath,
+                $"-y -i \"{input}\" -lavfi \"palettegen=stats_mode={Options.FFmpeg.GIFStatsMode}[palette]," +
+                $"[0:v][palette]paletteuse=dither={Options.FFmpeg.GIFDither}\" \"{output}\"");
         }
 
         private bool Run(string path, string args = null)
